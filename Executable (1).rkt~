@@ -1,0 +1,329 @@
+#lang racket
+(require racket/gui/base)
+(require "DL.rkt")
+(define (func)
+  (define temp (send input get-value))
+  (define ans (print-solution temp))
+  (send output set-value ans)
+  (define inc (incorrect-list temp))
+  (send incorrect-words update-choices inc))
+  
+
+(define mainframe (new frame%
+                       [label "CorRacketify"]
+                       [width 800]
+                       [height 800]
+                       [enabled #t]
+                       [border 5]))
+
+(send mainframe show #t)
+
+(define panel1 (new horizontal-panel%
+                    [parent mainframe]))
+
+(define input (new text-field%
+                   [parent panel1]
+                   [label "Enter Your Text Here"]
+                   [min-height 100]
+                   [style (list 'multiple)]
+
+                   [vert-margin 0]))
+(define correct-button(new button%
+                           [label "Correct It!"]
+                           [parent panel1]
+                           [callback (lambda (x y) (func))]
+                           ))
+(define panel2 (new horizontal-panel%
+                    [parent mainframe]))
+
+(define output (new text-field%
+                    [parent panel2]
+                    [label "Parsed Text"]
+                    [min-height 100]
+                    [horiz-margin 60]
+                    [vert-margin 0]))
+
+(define panel3 (new horizontal-panel%
+                    [parent mainframe]))
+
+(define incorrect-words 
+  (new (class combo-field%
+         (super-new)
+         
+         (inherit get-menu append)
+         
+         (define/public (update-choices choice-list)
+           ; remove all the old items
+           (map
+            (lambda (i)
+              (send i delete))
+            (send (get-menu) get-items))
+           ; set up the menu with all new items
+           (map
+            (lambda (choice-label)
+              (append choice-label))
+            choice-list)
+           (void)
+           ))
+       [parent panel3]
+       [label "Incorrect-Words"] 
+       [choices '()]
+       [callback (lambda (x y) (send suggestions update-choices (smart-correction (send x get-value) 1)))]
+       ))
+
+(define suggestions
+  (new (class combo-field%
+         (super-new)
+         
+         (inherit get-menu append)
+         
+         (define/public (update-choices choice-list)
+           ; remove all the old items
+           (map
+            (lambda (i)
+              (send i delete))
+            (send (get-menu) get-items))
+           ; set up the menu with all new items
+           (map
+            (lambda (choice-label)
+              (append choice-label))
+            choice-list)
+           (void)
+           ))
+       [parent panel3]
+       [label "Suggestions"] 
+       [choices '()]
+       [callback (lambda (x y) (define word (send x get-value))
+                   (set! sug word))]
+       ))
+(define add-button (new button%
+                           [label "Add To Dictionary"]
+                           [parent panel3]
+                           [callback (lambda (x y) (map modify-vec (hasher sug))
+                                       (set! dictree (add dictree sug)))]
+                           ))
+
+(define sug #f)
+
+
+(require racket/performance-hint)
+(require slideshow/text)
+(require data/bit-vector)
+
+(begin-encourage-inline
+  (define (rotl32 x r)
+    (get-in-range (bitwise-ior (arithmetic-shift x r)
+                               (arithmetic-shift x (* -1 (- 32 r))))))
+  
+  (define (get-in-range x)
+    (modulo x 10000000))
+  
+  (define (fmix32 h)
+    (begin
+      (set! h (bitwise-xor h (arithmetic-shift h -16)))
+      (set! h (* h #x85ebca6b))
+      (set! h (bitwise-xor h (arithmetic-shift h -13)))
+      (set! h (* h #xc2b2ae35))
+      (set! h (bitwise-xor h (arithmetic-shift h -16)))
+      (get-in-range h))))
+
+
+(define (murmur-hash key [seed 13])
+  (let* [(len (string-length key))
+         (data key)
+         (nblocks (quotient len 4))
+         (h1 seed)
+         (c1 #xcc9e2d51)
+         (c2 #x1b873593)
+         (nblocksX4 (* 4 nblocks))
+         (switch (bitwise-and len 3))
+         (k1 0)]
+    [begin
+      [for ([i (in-range 0 nblocks)])
+        [let* [(nblocksX4 (* 4 i))
+               (k1 0)]
+          [begin
+            (for ([j (in-range 0 4)])
+              [set! k1 (+ (char->integer (string-ref data (+ j nblocksX4))) (arithmetic-shift k1 8))])
+            (set! k1 (* k1 c1))
+            (set! k1 (rotl32 k1 15))
+            (set! k1 (* k1 c2))
+            (set! h1 (bitwise-xor h1 k1))
+            (set! h1 (rotl32 h1 13))
+            (set! h1 (get-in-range (+ #xe6546b64 (* h1 5))))]]]
+      [set! k1 0]
+      [cond
+        [(= switch 3) (begin
+                        (set! k1 (bitwise-xor k1 (arithmetic-shift (char->integer (string-ref data (+ nblocksX4 2))) 16)))
+                        (set! k1 (bitwise-xor k1 (arithmetic-shift (char->integer (string-ref data (+ nblocksX4 1))) 8)))
+                        (set! k1 (bitwise-xor k1 (char->integer (string-ref data nblocksX4))))
+                        (set! k1 (* k1 c1))
+                        (set! k1 (rotl32 k1 15))
+                        (set! k1 (* k1 c2))
+                        (set! h1 (get-in-range (bitwise-xor h1 k1))))]
+        [(= switch 2) (begin
+                        (set! k1 (bitwise-xor k1 (arithmetic-shift (char->integer (string-ref data (+ nblocksX4 1))) 8)))
+                        (set! k1 (bitwise-xor k1 (char->integer (string-ref data nblocksX4))))
+                        (set! k1 (* k1 c1))
+                        (set! k1 (rotl32 k1 15))
+                        (set! k1 (* k1 c2))
+                        (set! h1 (get-in-range (bitwise-xor h1 k1))))]
+        [(= switch 1) (begin
+                        (set! k1 (bitwise-xor k1 (char->integer (string-ref data nblocksX4))))
+                        (set! k1 (* k1 c1))
+                        (set! k1 (rotl32 k1 15))
+                        (set! k1 (* k1 c2))
+                        (set! h1 (get-in-range (bitwise-xor h1 k1))))]
+        [else 0]]
+      [set! h1 (get-in-range (bitwise-xor h1 len))]
+      h1]))
+
+(struct bknode (pdis value nodes) #:transparent)
+(define bki (open-input-file "dic.txt"))
+(define dictree (bknode 0 "correct" '()))
+(define (make-tree)
+  (define word (read-line bki 'return-linefeed))
+  (cond [(not (eof-object? word))
+         (set! dictree (add dictree word))
+         (make-tree)]))
+
+
+(define (add bktree word)
+  (define x (edit-distance word (bknode-value bktree)))
+  (cond [(nodes-present? x (bknode-nodes bktree))
+         (bknode (bknode-pdis bktree) (bknode-value bktree) (map (lambda (subtree)
+                                                                   (cond [(= (bknode-pdis subtree) x)
+                                                                          (add subtree word)]
+                                                                         [else subtree]))
+                                                                 (bknode-nodes bktree)))]
+        [else
+         (bknode (bknode-pdis bktree) (bknode-value bktree)
+                 (cons (bknode x word '()) (bknode-nodes bktree)))]))
+
+(define (nodes-present? val bnodes)
+  (cond [(null? bnodes) #f]
+        [(= val (bknode-pdis (car bnodes))) #t]
+        [else (nodes-present? val (cdr bnodes))]))
+(define tol 2)
+
+(define (find-matching-words word tree)
+  (define dis (edit-distance word (bknode-value tree)))
+  (cond [(<= dis tol)
+         (cons (bknode-value tree) (append* (map (lambda (bkn)
+                                                   (cond [(<= (edit-distance (bknode-value bkn) word)
+                                                              (+ dis tol))
+                                                          (find-matching-words word bkn)]
+                                                         [else '()]))
+                                                 (bknode-nodes tree))))]
+        [else
+         (append* (map (lambda (bkn)
+                         (define temp (edit-distance (bknode-value bkn) word))
+                         (cond [(and (<= temp (+ dis tol))
+                                     (>= temp (- dis tol)))
+                                (find-matching-words word bkn)]
+                               [else '()]))
+                       (bknode-nodes tree)))]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define i (open-input-file "dic.txt"))
+(define bloom-vec (make-bit-vector 10000000 #f))
+(define (gen-vector)
+  (define word (read-line i))
+  (cond [(not (eof-object? word))
+         (begin
+           (set! word (operate word))
+           (define hash-list (hasher word))
+           (map modify-vec hash-list)
+           (gen-vector))]))
+(define (modify-vec num)
+  (bit-vector-set! bloom-vec num #t))
+(define (operate word)
+  (define demo-word (string->list word))
+  (set! demo-word (reverse demo-word))
+  (cond [(char=? (car demo-word) #\newline)
+         (set! demo-word (cdr demo-word))])
+  (list->string (reverse demo-word)))
+(define (reverse l)
+  (rev-h l '()))
+(define (rev-h l l1)
+  (cond [(null? l) l1]
+        [else (rev-h (cdr l) (cons (car l) l1))]))
+
+
+(define (hasher word)
+  (define key-list '())
+  (for ([i (in-range 10 20)])
+    (set! key-list (cons (remainder (abs (murmur-hash word i)) 10000000) key-list)))
+  key-list
+  ) 
+
+
+(define (smart-correction word n)
+  (define x (find-matching-words word dictree))
+  (define one-list (lc z : z <- x @(equal? (edit-distance z word) 1)))
+  (define l (length one-list)) 
+  (if (>= l n) (first n one-list) (cons one-list (first (- n l) x))))
+                                                         
+(define (get-corrections lowords n)
+  (map (lambda (word)
+         (cons word (smart-correction word n))) lowords))
+
+(define (first n l)
+  (cond [(or (null? l) (= n 0)) '()]
+        [else (cons (car l) (first (- n 1) (cdr l)))]))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define (is-correct? word)
+  
+  (begin
+    (set! word (operate word))
+    (define hash-list (hasher word))
+    (is-all-true hash-list)   
+         
+    ))
+
+(define (present? x l)
+  (cond [(null? l) #f]
+        [else (if (equal? (car l) x) #t (present? x (cdr l)))]
+        ))     
+  
+(define (is-all-true hash-list)
+  (cond [(null? hash-list) #t]
+        [else (if (equal? (bit-vector-ref bloom-vec (car hash-list)) #f) #f (is-all-true (cdr hash-list)))]
+        ))
+;;;;;;;;;;Check-bloom;;;;;;;;;;
+
+;;;;;;;;;Check Spellings;;;;;;;
+
+
+(define (result-generator str)
+  
+  (define ip (open-input-string str))
+  (define incorrect-list '())
+  (define modified-string "")
+  (define (result-gen)
+    (let* ([word (~a (read ip))])
+      (cond [(equal? word "#<eof>") (cons modified-string incorrect-list )]
+            [else
+             (if (not (is-correct? word)) (begin (set! incorrect-list (cons word incorrect-list))
+                                                 (set! modified-string (string-append modified-string (string-append " " (modify word))))
+                                                 (result-gen))
+                 (begin
+                   (set! modified-string (string-append modified-string (string-append " " word)))
+                   (result-gen))
+                 ) ]
+            )))
+  (result-gen)
+  )
+
+
+(define (print-solution str)
+  (car (result-generator str)))
+
+(define (incorrect-list str)
+  (cdr (result-generator str)))
+
+(define (modify word)
+  "INCORRACKET")
+
+(make-tree)
+(gen-vector)
